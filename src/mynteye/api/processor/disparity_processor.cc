@@ -21,6 +21,7 @@
 #include <opencv2/core/persistence.hpp>
 #endif
 #include "mynteye/logger.h"
+#include <opencv2/cudastereo.hpp>
 
 MYNTEYE_BEGIN_NAMESPACE
 
@@ -77,7 +78,7 @@ DisparityProcessor::DisparityProcessor(DisparityComputingMethod type,
     sgbm_matcher->setP2(32 * sgbmWinSize * sgbmWinSize);
     sgbm_matcher->setMinDisparity(0);
     sgbm_matcher->setNumDisparities(numberOfDisparities);
-    sgbm_matcher->setUniquenessRatio(10);
+    sgbm_matcher->setUniquenessRatio(60);
     sgbm_matcher->setSpeckleWindowSize(100);
     sgbm_matcher->setSpeckleRange(32);
     sgbm_matcher->setDisp12MaxDiff(1);
@@ -85,7 +86,7 @@ DisparityProcessor::DisparityProcessor(DisparityComputingMethod type,
       std::make_shared<int>(sgbm_matcher->getMinDisparity());
     disparity_max_sgbm_ptr =
       std::make_shared<int>(sgbm_matcher->getNumDisparities());
-    bm_matcher = cv::StereoBM::create(0, 3);
+    bm_matcher = cv::cuda::createStereoBM(128, 15);
     bm_matcher->setPreFilterSize(9);
     bm_matcher->setPreFilterCap(31);
     bm_matcher->setBlockSize(15);
@@ -95,7 +96,7 @@ DisparityProcessor::DisparityProcessor(DisparityComputingMethod type,
     bm_matcher->setTextureThreshold(10);
     bm_matcher->setSpeckleWindowSize(100);
     bm_matcher->setSpeckleRange(4);
-    bm_matcher->setPreFilterType(cv::StereoBM::PREFILTER_XSOBEL);
+    bm_matcher->setPreFilterType(cv::cuda::StereoBM::PREFILTER_XSOBEL);
     disparity_min_bm_ptr =
       std::make_shared<int>(bm_matcher->getMinDisparity());
     disparity_max_bm_ptr =
@@ -159,7 +160,8 @@ bool DisparityProcessor::OnProcess(
   const ObjMat2 *input = Object::Cast<ObjMat2>(in);
   ObjMat *output = Object::Cast<ObjMat>(out);
 
-  cv::Mat disparity;
+  cv::cuda::GpuMat disparity;
+  cv::Mat disparity_cpu;
 #ifdef WITH_OPENCV2
   // StereoSGBM::operator()
   //   http://docs.opencv.org/2.4/modules/calib3d/doc/camera_calibration_and_3d_reconstruction.html#stereosgbm-operator
@@ -169,10 +171,10 @@ bool DisparityProcessor::OnProcess(
   // disparity map,
   // you need to divide each disp element by 16.
   if (type_ == DisparityComputingMethod::SGBM) {
-    (*sgbm_matcher)(input->first, input->second, disparity);
+    (*sgbm_matcher)(input->first, input->second, disparity_cpu);
   } else if (type_ == DisparityComputingMethod::BM) {
     // LOG(ERROR) << "not supported in opencv 2.x";
-    (*sgbm_matcher)(input->first, input->second, disparity);
+    (*sgbm_matcher)(input->first, input->second, disparity_cpu);
     disparity.convertTo(output->value, CV_32F, 1./16, 1);
     // cv::Mat tmp1, tmp2;
     // cv::cvtColor(input->first, tmp1, CV_RGB2GRAY);
@@ -188,25 +190,29 @@ bool DisparityProcessor::OnProcess(
   // (where each disparity value has 4 fractional bits),
   // whereas other algorithms output 32-bit floating-point disparity map.
   if (type_ == DisparityComputingMethod::SGBM) {
-    sgbm_matcher->compute(input->first, input->second, disparity);
+    sgbm_matcher->compute(input->first, input->second, disparity_cpu);
   } else if (type_ == DisparityComputingMethod::BM) {
-    cv::Mat tmp1, tmp2;
+    cv::cuda::GpuMat tmp1, tmp2;
     if (input->first.channels() == 1) {
       // s1030
-      tmp1 = input->first;
-      tmp2 = input->second;
+      tmp1.upload(input->first);
+      tmp2.upload(input->second);
     } else if (input->first.channels() >= 3) {
       // s210
-      cv::cvtColor(input->first, tmp1, cv::COLOR_RGB2GRAY);
-      cv::cvtColor(input->second, tmp2, cv::COLOR_RGB2GRAY);
+      cv::Mat tmp1_cpu, tmp2_cpu;
+      cv::cvtColor(input->first, tmp1_cpu, cv::COLOR_RGB2GRAY);
+      cv::cvtColor(input->second, tmp2_cpu, cv::COLOR_RGB2GRAY);
+      tmp1.upload(tmp1_cpu);
+      tmp2.upload(tmp2_cpu);
     }
     bm_matcher->compute(tmp1, tmp2, disparity);
+    disparity.download(disparity_cpu);
   } else {
     // default
-    sgbm_matcher->compute(input->first, input->second, disparity);
+    sgbm_matcher->compute(input->first, input->second, disparity_cpu);
   }
 #endif
-  disparity.convertTo(output->value, CV_32F, 1./16, cx1_minus_cx2_);
+  disparity_cpu.convertTo(output->value, CV_32F, 1./16, cx1_minus_cx2_);
   output->id = input->first_id;
   output->data = input->first_data;
   return true;
