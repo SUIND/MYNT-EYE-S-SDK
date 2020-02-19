@@ -190,7 +190,7 @@ bool DisparityProcessor::OnProcess(
   // (where each disparity value has 4 fractional bits),
   // whereas other algorithms output 32-bit floating-point disparity map.
   if (type_ == DisparityComputingMethod::SGBM) {
-    sgbm_matcher->compute(input->first, input->second, disparity_cpu);
+    //sgbm_matcher->compute(input->first, input->second, disparity_cpu);
   } else if (type_ == DisparityComputingMethod::BM) {
     cv::cuda::GpuMat tmp1, tmp2;
     if (input->first.channels() == 1) {
@@ -205,14 +205,14 @@ bool DisparityProcessor::OnProcess(
       tmp1.upload(tmp1_cpu);
       tmp2.upload(tmp2_cpu);
     }
-    bm_matcher->compute(tmp1, tmp2, disparity);
-    disparity.download(disparity_cpu);
+    //bm_matcher->compute(tmp1, tmp2, disparity);
+    //disparity.download(disparity_cpu);
   } else {
     // default
-    sgbm_matcher->compute(input->first, input->second, disparity_cpu);
+    //sgbm_matcher->compute(input->first, input->second, disparity_cpu);
   }
 #endif
-  disparity_cpu.convertTo(output->value, CV_32F, 1./16, cx1_minus_cx2_);
+  //disparity_cpu.convertTo(output->value, CV_32F, 1./16, cx1_minus_cx2_);
   output->id = input->first_id;
   output->data = input->first_data;
   return true;
