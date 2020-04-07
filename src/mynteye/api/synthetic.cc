@@ -196,7 +196,7 @@ void Synthetic::EnableStreamData(
         }
         if (act_tag > 0 && !proce->IsActivated()) {
           // std::cout << proce->Name() << " Active now" << std::endl;
-          //proce->Activate();
+          proce->Activate();
         }
       });
 }
